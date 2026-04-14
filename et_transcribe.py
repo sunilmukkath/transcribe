@@ -5,6 +5,12 @@ import streamlit as st
 import whisper, tempfile, os, numpy as np
 from pathlib import Path
 from datetime import datetime
+try:
+    from pyannote.audio import Pipeline as PyannotePipeline
+    PYANNOTE_AVAILABLE = True
+except Exception:
+    PyannotePipeline = None
+    PYANNOTE_AVAILABLE = False
 
 st.set_page_config(page_title="Elastic Tree · Transcription", page_icon="🌳", layout="wide")
 
@@ -43,7 +49,7 @@ html,body,.stApp{background:#06041a!important;}
 [data-testid="stHorizontalBlock"] > [data-testid="column"]:first-child {
   background:linear-gradient(145deg,#06041a 0%,#0c0a28 50%,#100e38 100%);
   min-height:100vh;
-  padding:5rem 5rem 4rem !important;
+  padding:5rem 5rem 4rem 8rem !important;
   position:relative;
   overflow:hidden;
 }
@@ -216,7 +222,7 @@ html,body,.stApp{background:#06041a!important;}
     </div>
     <div class="lp-feat">
       <div class="lp-feat-icon">{chk}</div>
-      <div class="lp-feat-body"><strong>Auto speaker detection</strong> — Moderator vs Respondent, no setup</div>
+      <div class="lp-feat-body"><strong>Speaker diarization</strong> — Speaker 1 / Speaker 2 based on voice</div>
     </div>
     <div class="lp-feat">
       <div class="lp-feat-icon">{chk}</div>
@@ -476,6 +482,15 @@ with st.sidebar:
     model_size = st.selectbox("Whisper Model", options=["medium","large"], help="'large'=more accurate. 'medium'=faster.")
     output_mode = st.radio("Output Mode", options=["translate","transcribe"],
         format_func=lambda x: "Translate → English" if x=="translate" else "Transcribe (original language)")
+    true_speaker_sep = st.toggle("True Speaker Separation", value=True, help="Uses pyannote diarization for voice-based speakers.")
+    hard_fail_diarization = st.toggle(
+        "Hard Fail if Diarization Unavailable",
+        value=False,
+        help="If enabled, transcription aborts unless true diarization is active."
+    )
+    hf_token = st.text_input("Hugging Face Token", type="password", help="Required for pyannote models (read access token).")
+    diar_min = st.number_input("Min Speakers", min_value=1, max_value=8, value=2, step=1)
+    diar_max = st.number_input("Max Speakers", min_value=1, max_value=8, value=4, step=1)
     output_folder = st.text_input("Save Folder", value=str(Path.home()/"Desktop"/"ET_Transcripts"))
     st.markdown("<hr/>", unsafe_allow_html=True)
     st.markdown("""<div style="font-size:0.72rem;color:rgba(255,255,255,0.25);line-height:1.7;">Elastic Tree Consumer Insights<br>Chennai · Internal use only</div>""", unsafe_allow_html=True)
@@ -509,6 +524,191 @@ def build_speaker_turns(segments, gap):
             cur["end"]=seg["end"]; cur["text"]+=" "+seg["text"].strip(); cur["logprobs"].append(seg.get("avg_logprob",-0.3))
     if cur: turns.append(cur)
     return turns
+
+def _segment_voice_embedding(audio, start_s, end_s, sample_rate=16000):
+    """Create a compact voice fingerprint from a segment using Whisper mel features."""
+    s = max(0, int(start_s * sample_rate))
+    e = min(len(audio), int(end_s * sample_rate))
+    if e - s < int(0.35 * sample_rate):
+        return None
+    seg_audio = audio[s:e]
+    mel = whisper.log_mel_spectrogram(seg_audio, n_mels=80).numpy()
+    if mel.shape[1] < 3:
+        return None
+    mean_vec = mel.mean(axis=1)
+    std_vec = mel.std(axis=1)
+    emb = np.concatenate([mean_vec, std_vec]).astype(np.float32)
+    norm = np.linalg.norm(emb) + 1e-8
+    return emb / norm
+
+def _kmeans_np(x, k, seed=42, max_iter=40):
+    rng = np.random.default_rng(seed)
+    n = len(x)
+    if k <= 1 or n == 0:
+        return np.zeros(n, dtype=int)
+    centers = x[rng.choice(n, size=k, replace=False)]
+    labels = np.zeros(n, dtype=int)
+    for _ in range(max_iter):
+        dists = ((x[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+        new_labels = dists.argmin(axis=1)
+        if np.array_equal(new_labels, labels):
+            break
+        labels = new_labels
+        for c in range(k):
+            members = x[labels == c]
+            if len(members):
+                centers[c] = members.mean(axis=0)
+            else:
+                centers[c] = x[rng.integers(0, n)]
+    return labels
+
+def _silhouette_score(x, labels):
+    n = len(x)
+    if n < 3:
+        return -1.0
+    dmat = np.sqrt(((x[:, None, :] - x[None, :, :]) ** 2).sum(axis=2))
+    score_sum = 0.0
+    for i in range(n):
+        same = labels == labels[i]
+        same_count = int(same.sum())
+        if same_count <= 1:
+            continue
+        a = dmat[i, same].sum() / (same_count - 1)
+        b = np.inf
+        for cl in np.unique(labels):
+            if cl == labels[i]:
+                continue
+            other = labels == cl
+            if other.any():
+                b = min(b, dmat[i, other].mean())
+        if np.isfinite(b):
+            score_sum += (b - a) / max(a, b, 1e-8)
+    return score_sum / n
+
+def build_diarized_turns(segments, audio, sample_rate, gap, max_speakers=4):
+    """Voice-based speaker clustering + pause-aware turn merge."""
+    if not segments:
+        return [], False
+    usable_idx, feats = [], []
+    for i, seg in enumerate(segments):
+        emb = _segment_voice_embedding(audio, seg["start"], seg["end"], sample_rate=sample_rate)
+        if emb is not None:
+            usable_idx.append(i)
+            feats.append(emb)
+    if len(feats) < 2:
+        return build_speaker_turns(segments, gap), False
+
+    x = np.vstack(feats)
+    k_max = min(max_speakers, len(x))
+    best_labels = np.zeros(len(x), dtype=int)
+    best_score = -2.0
+    for k in range(2, k_max + 1):
+        labels = _kmeans_np(x, k)
+        score = _silhouette_score(x, labels)
+        if score > best_score:
+            best_score = score
+            best_labels = labels
+
+    speaker_per_segment = np.zeros(len(segments), dtype=int)
+    for idx, lab in zip(usable_idx, best_labels):
+        speaker_per_segment[idx] = int(lab)
+    for i in range(1, len(segments)):
+        if i not in usable_idx:
+            speaker_per_segment[i] = speaker_per_segment[i - 1]
+
+    turns, cur = [], None
+    for i, seg in enumerate(segments):
+        spk = int(speaker_per_segment[i])
+        if cur is None:
+            cur = {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip(),
+                   "logprobs": [seg.get("avg_logprob", -0.3)], "speaker_idx": spk}
+            continue
+        gap_hit = seg["start"] - cur["end"] >= gap
+        speaker_switch = spk != cur["speaker_idx"]
+        if gap_hit or speaker_switch:
+            turns.append(cur)
+            cur = {"start": seg["start"], "end": seg["end"], "text": seg["text"].strip(),
+                   "logprobs": [seg.get("avg_logprob", -0.3)], "speaker_idx": spk}
+        else:
+            cur["end"] = seg["end"]
+            cur["text"] += " " + seg["text"].strip()
+            cur["logprobs"].append(seg.get("avg_logprob", -0.3))
+    if cur:
+        turns.append(cur)
+
+    # Stable human-friendly names by first appearance: Speaker 1, Speaker 2...
+    remap, nxt = {}, 0
+    for t in turns:
+        raw = t["speaker_idx"]
+        if raw not in remap:
+            remap[raw] = nxt
+            nxt += 1
+        t["speaker_idx"] = remap[raw]
+    return turns, True
+
+@st.cache_resource(show_spinner=False)
+def load_pyannote_pipeline(hf_token):
+    if not PYANNOTE_AVAILABLE:
+        return None
+    if not hf_token:
+        return None
+    return PyannotePipeline.from_pretrained(
+        "pyannote/speaker-diarization-3.1",
+        token=hf_token
+    )
+
+def build_true_diarized_turns(segments, diarization, gap):
+    """Assign each Whisper segment to pyannote speaker labels."""
+    if not segments:
+        return [], False
+
+    diar_spans = []
+    for turn, _, speaker in diarization.itertracks(yield_label=True):
+        diar_spans.append((float(turn.start), float(turn.end), str(speaker)))
+    if not diar_spans:
+        return [], False
+
+    turns, cur = [], None
+    last_speaker = diar_spans[0][2]
+    for seg in segments:
+        s0, s1 = float(seg["start"]), float(seg["end"])
+        best_spk, best_overlap = None, 0.0
+        for d0, d1, spk in diar_spans:
+            overlap = max(0.0, min(s1, d1) - max(s0, d0))
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_spk = spk
+        if best_spk is None:
+            best_spk = last_speaker
+        last_speaker = best_spk
+
+        if cur is None:
+            cur = {"start": s0, "end": s1, "text": seg["text"].strip(),
+                   "logprobs": [seg.get("avg_logprob", -0.3)], "speaker_key": best_spk}
+            continue
+
+        gap_hit = s0 - cur["end"] >= gap
+        speaker_switch = best_spk != cur["speaker_key"]
+        if gap_hit or speaker_switch:
+            turns.append(cur)
+            cur = {"start": s0, "end": s1, "text": seg["text"].strip(),
+                   "logprobs": [seg.get("avg_logprob", -0.3)], "speaker_key": best_spk}
+        else:
+            cur["end"] = s1
+            cur["text"] += " " + seg["text"].strip()
+            cur["logprobs"].append(seg.get("avg_logprob", -0.3))
+    if cur:
+        turns.append(cur)
+
+    remap, nxt = {}, 0
+    for t in turns:
+        key = t["speaker_key"]
+        if key not in remap:
+            remap[key] = nxt
+            nxt += 1
+        t["speaker_idx"] = remap[key]
+        del t["speaker_key"]
+    return turns, True
 
 st.markdown("""
 <div style="margin-bottom:.6rem;">
@@ -577,7 +777,59 @@ if uploaded_files:
                 for seg in chunk_result.get("segments",[]):
                     seg["start"]+=offset; seg["end"]+=offset; all_segments.append(seg)
             progress_bar.progress(100,text=f"✅ Done — {total_chunks} chunks processed")
-            turns=build_speaker_turns(all_segments,gap=auto_speaker_gap(all_segments))
+            gap = auto_speaker_gap(all_segments)
+            turns, used_diarization = [], False
+            if true_speaker_sep and hf_token:
+                try:
+                    diar_pipeline = load_pyannote_pipeline(hf_token)
+                    if diar_pipeline is None:
+                        if hard_fail_diarization:
+                            raise RuntimeError("True diarization backend unavailable in this environment.")
+                        st.warning("True diarization not available in this environment. Using fallback.")
+                    else:
+                        diarization = diar_pipeline(tmp_path, min_speakers=int(diar_min), max_speakers=int(max(diar_min, diar_max)))
+                        turns, used_diarization = build_true_diarized_turns(all_segments, diarization, gap=gap)
+                        if used_diarization:
+                            st.info("🧠 True speaker diarization enabled (voice-based Speaker 1, Speaker 2, ...)")
+                        elif hard_fail_diarization:
+                            raise RuntimeError("True diarization returned no speaker tracks.")
+                except Exception as e:
+                    if hard_fail_diarization:
+                        st.error(f"Hard-fail mode active: {e}")
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                        st.stop()
+                    st.warning(f"True diarization failed: {e}. Using fallback separation.")
+
+            if not used_diarization:
+                if hard_fail_diarization:
+                    if not true_speaker_sep:
+                        st.error("Hard-fail mode active: enable 'True Speaker Separation'.")
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                        st.stop()
+                    if not hf_token:
+                        st.error("Hard-fail mode active: Hugging Face token is required.")
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+                        st.stop()
+                turns, _ = build_diarized_turns(
+                    all_segments,
+                    audio=audio,
+                    sample_rate=SAMPLE_RATE,
+                    gap=gap,
+                    max_speakers=4
+                )
+                if true_speaker_sep and not hf_token:
+                    st.info("ℹ️ Add Hugging Face token in sidebar for true speaker diarization.")
+                else:
+                    st.info("ℹ️ Used fallback speaker separation.")
             all_lp=[lp for t in turns for lp in t["logprobs"]]
             avg_acc=np.mean(all_lp) if all_lp else -0.3
             high_c=sum(1 for lp in all_lp if lp>=-0.3); med_c=sum(1 for lp in all_lp if -0.7<=lp<-0.3); low_c=sum(1 for lp in all_lp if lp<-0.7)
@@ -597,7 +849,7 @@ if uploaded_files:
             </div>""", unsafe_allow_html=True)
             plain_lines=[]
             for turn in turns:
-                is_mod=(turn["speaker_idx"]%2==0); speaker="Moderator" if is_mod else "Respondent"
+                is_mod=(turn["speaker_idx"]%2==0); speaker=f"Speaker {turn['speaker_idx']+1}"
                 css_c="turn-moderator" if is_mod else "turn-respondent"; lbl_c="speaker-mod" if is_mod else "speaker-res"
                 avg_lp=np.mean(turn["logprobs"]) if turn["logprobs"] else -0.3
                 acc_lbl,acc_css=logprob_to_accuracy(avg_lp)
