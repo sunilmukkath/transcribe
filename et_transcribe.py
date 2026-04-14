@@ -641,10 +641,11 @@ with st.sidebar:
                            format_func=lambda x: "Translate → English" if x == "translate" else "Transcribe (original language)")
 
     st.markdown("<div class='sb-section'>Speaker Diarization</div>", unsafe_allow_html=True)
-    true_speaker_sep = st.toggle("True Speaker Separation", value=True,
-                                  help="Uses pyannote voice diarization.")
-    hard_fail_diarization = st.toggle("Hard Fail if Unavailable", value=False,
-                                       help="Abort if true diarization cannot run.")
+    _toggle = getattr(st, "toggle", st.checkbox)
+    true_speaker_sep = _toggle("True Speaker Separation", value=True,
+                               help="Uses pyannote voice diarization.")
+    hard_fail_diarization = _toggle("Hard Fail if Unavailable", value=False,
+                                    help="Abort if true diarization cannot run.")
     hf_token = st.text_input("Hugging Face Token", type="password",
                                help="Required for pyannote models.")
     col_min, col_max = st.columns(2)
@@ -937,7 +938,7 @@ def build_true_diarized_turns(segments, diarization, gap):
 # ═══════════════════════════════════════════════════════════════
 # UPLOAD  — Step 1
 # ═══════════════════════════════════════════════════════════════
-up_l, up_r = st.columns([3, 2], vertical_alignment="bottom")
+up_l, up_r = st.columns([3, 2])
 with up_l:
     st.markdown(
         "<p class='section-title' style='margin-bottom:6px;'>Upload Audio or Video</p>"
