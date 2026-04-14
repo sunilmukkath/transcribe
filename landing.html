@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elastic Tree - Advanced Audio Transcription</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #07092b;
+            --secondary: #0a0d36;
+            --accent: #d4af37;
+            --accent-light: #e8d4a8;
+            --text-primary: #ffffff;
+            --text-secondary: #b8c5d6;
+            --border: rgba(212, 175, 55, 0.18);
+        }
+
+        html, body {
+            font-family: 'Inter', sans-serif;
+            background: var(--primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ─── Background Effects ─── */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at 20% 50%, rgba(212, 175, 55, 0.05) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 80%, rgba(212, 175, 55, 0.03) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* ─── Navigation ─── */
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(10px);
+            background: rgba(7, 9, 43, 0.7);
+            border-bottom: 1px solid var(--border);
+            z-index: 1000;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--accent);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .logo:hover {
+            color: var(--accent-light);
+        }
+
+        .logo img {
+            width: 40px;
+            height: 40px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2.5rem;
+            align-items: center;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+            font-size: 0.95rem;
+        }
+
+        .nav-links a:hover {
+            color: var(--accent);
+        }
+
+        .btn-login {
+            background: var(--accent);
+            color: var(--primary);
+            padding: 0.7rem 1.5rem;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-login:hover {
+            background: var(--accent-light);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(212, 175, 55, 0.2);
+        }
+
+        /* ─── Hero Section ─── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8rem 2rem 4rem;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-content {
+            max-width: 900px;
+            animation: fadeInUp 1s ease-out;
+        }
+
+        .hero-badge {
+            display: inline-block;
+            background: rgba(212, 175, 55, 0.1);
+            border: 1px solid var(--border);
+            color: var(--accent);
+            padding: 0.6rem 1.2rem;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .hero h1 {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(2.5rem, 8vw, 4.5rem);
+            font-weight: 800;
+            margin-bottom: 1.5rem;
+            line-height: 1.2;
+            background: linear-gradient(135deg, #ffffff 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            margin-bottom: 2.5rem;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            line-height: 1.8;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 2rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent) 0%, #f0c856 100%);
+            color: var(--primary);
+            padding: 1rem 2.5rem;
+            border-radius: 10px;
+            border: none;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 15px 40px rgba(212, 175, 55, 0.25);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 25px 50px rgba(212, 175, 55, 0.35);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-primary);
+            padding: 1rem 2.5rem;
+            border-radius: 10px;
+            border: 1.5px solid var(--border);
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(212, 175, 55, 0.1);
+            border-color: var(--accent);
+            transform: translateY(-4px);
+        }
+
+        /* ─── Features Section ─── */
+        .features {
+            padding: 6rem 2rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .section-header h2 {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(2rem, 6vw, 3.5rem);
+            font-weight: 700;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #ffffff 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .section-header p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2.5rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .feature-card {
+            background: linear-gradient(135deg, rgba(212, 175, 55, 0.08) 0%, rgba(212, 175, 55, 0.02) 100%);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2.5rem;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-8px);
+            border-color: var(--accent);
+            box-shadow: 0 20px 60px rgba(212, 175, 55, 0.15);
+        }
+
+        .feature-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, var(--accent), #f0c856);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.3rem;
+            margin-bottom: 0.8rem;
+            font-weight: 700;
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            line-height: 1.7;
+            font-size: 0.95rem;
+        }
+
+        /* ─── How It Works ─── */
+        .how-it-works {
+            padding: 6rem 2rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 3rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .step {
+            text-align: center;
+        }
+
+        .step-number {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, var(--accent), #f0c856);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--primary);
+            margin: 0 auto 1.5rem;
+            box-shadow: 0 15px 40px rgba(212, 175, 55, 0.25);
+        }
+
+        .step h3 {
+            font-size: 1.2rem;
+            margin-bottom: 0.8rem;
+            font-weight: 700;
+        }
+
+        .step p {
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        /* ─── Stats Section ─── */
+        .stats {
+            padding: 4rem 2rem;
+            background: linear-gradient(135deg, rgba(212, 175, 55, 0.05) 0%, rgba(212, 175, 55, 0.02) 100%);
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            position: relative;
+            z-index: 1;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .stat-item h4 {
+            font-size: 2.5rem;
+            color: var(--accent);
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-item p {
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        /* ─── CTA Section ─── */
+        .cta {
+            padding: 6rem 2rem;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .cta h2 {
+            font-family: 'Playfair Display', serif;
+            font-size: clamp(2rem, 6vw, 3rem);
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(135deg, #ffffff 0%, var(--accent) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .cta p {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            margin-bottom: 2.5rem;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        /* ─── Languages Section ─── */
+        .languages {
+            padding: 4rem 2rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .languages-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1.5rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .language-badge {
+            background: rgba(212, 175, 55, 0.08);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: default;
+        }
+
+        .language-badge:hover {
+            background: rgba(212, 175, 55, 0.15);
+            border-color: var(--accent);
+            transform: translateY(-4px);
+        }
+
+        .language-badge p {
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+        }
+
+        .language-badge small {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+
+        /* ─── Footer ─── */
+        footer {
+            padding: 3rem 2rem;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            color: var(--text-secondary);
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ─── Animations ─── */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width: 768px) {
+            nav {
+                padding: 1rem 1.5rem;
+            }
+
+            .nav-links {
+                gap: 1.5rem;
+                font-size: 0.9rem;
+            }
+
+            .hero-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .btn-primary, .btn-secondary {
+                width: 100%;
+                max-width: 300px;
+            }
+
+            .features-grid, .steps, .stats-grid {
+                gap: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav>
+        <a href="#" class="logo">
+            🌳 Elastic Tree
+        </a>
+        <ul class="nav-links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#how-it-works">How It Works</a></li>
+            <li><a href="#languages">Languages</a></li>
+            <button class="btn-login">Sign In</button>
+        </ul>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">✨ Professional Audio Intelligence</div>
+            <h1>Transcription Redefined</h1>
+            <p>
+                Transform audio into accurate, speaker-identified transcripts with cutting-edge AI.
+                Support for 25+ Indian languages with real-time speaker diarization technology.
+            </p>
+            <div class="hero-buttons">
+                <button class="btn-primary">Get Started Free</button>
+                <button class="btn-secondary">Watch Demo</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features" id="features">
+        <div class="section-header">
+            <h2>Powerful Capabilities</h2>
+            <p>Everything you need for professional audio transcription</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">🎤</div>
+                <h3>Speaker Diarization</h3>
+                <p>Automatically identify and distinguish between multiple speakers with advanced AI technology.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🌐</div>
+                <h3>Multi-Language</h3>
+                <p>Support for 25+ Indian languages including Hindi, Bengali, Tamil, Telugu, and many more.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>Fast Processing</h3>
+                <p>Get your transcripts in minutes, not hours. Optimized for speed without compromising accuracy.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎯</div>
+                <h3>High Accuracy</h3>
+                <p>State-of-the-art Whisper technology ensures exceptional transcription accuracy every time.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔒</div>
+                <h3>Secure & Private</h3>
+                <p>Your audio data is encrypted and processed securely. We never store your content.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">💼</div>
+                <h3>Enterprise Ready</h3>
+                <p>Built for business users. Seamless integration with your existing workflows.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Statistics -->
+    <section class="stats">
+        <div class="stats-grid">
+            <div class="stat-item">
+                <h4>50K+</h4>
+                <p>Audio Files Processed</p>
+            </div>
+            <div class="stat-item">
+                <h4>25+</h4>
+                <p>Languages Supported</p>
+            </div>
+            <div class="stat-item">
+                <h4>99%</h4>
+                <p>Accuracy Rate</p>
+            </div>
+            <div class="stat-item">
+                <h4>10,000+</h4>
+                <p>Active Users</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="how-it-works" id="how-it-works">
+        <div class="section-header">
+            <h2>How It Works</h2>
+            <p>Simple, intuitive, and powerful</p>
+        </div>
+        <div class="steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <h3>Upload Audio</h3>
+                <p>Choose your audio file—MP3, WAV, M4A, or any common format.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <h3>Select Language</h3>
+                <p>Pick your language or let our AI auto-detect for you.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <h3>Process & Identify</h3>
+                <p>Our AI transcribes and identifies each speaker automatically.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">4</div>
+                <h3>Export & Use</h3>
+                <p>Download your transcript in multiple formats instantly.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Supported Languages -->
+    <section class="languages" id="languages">
+        <div class="section-header">
+            <h2>Supported Languages</h2>
+            <p>Complete coverage of major Indian languages</p>
+        </div>
+        <div class="languages-grid">
+            <div class="language-badge"><p>Hindi</p><small>हिंदी</small></div>
+            <div class="language-badge"><p>Bengali</p><small>বাংলা</small></div>
+            <div class="language-badge"><p>Tamil</p><small>தமிழ்</small></div>
+            <div class="language-badge"><p>Telugu</p><small>తెలుగు</small></div>
+            <div class="language-badge"><p>Marathi</p><small>मराठी</small></div>
+            <div class="language-badge"><p>Gujarati</p><small>ગુજરાતી</small></div>
+            <div class="language-badge"><p>Kannada</p><small>ಕನ್ನಡ</small></div>
+            <div class="language-badge"><p>Malayalam</p><small>മലയാളം</small></div>
+            <div class="language-badge"><p>Punjabi</p><small>ਪੰਜਾਬੀ</small></div>
+            <div class="language-badge"><p>Odia</p><small>ଓଡ଼ିଆ</small></div>
+            <div class="language-badge"><p>Urdu</p><small>اردو</small></div>
+            <div class="language-badge"><p>+ 14 More</p><small>Languages</small></div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta">
+        <h2>Ready to Transform Your Audio?</h2>
+        <p>Join thousands of professionals already using Elastic Tree for their transcription needs.</p>
+        <button class="btn-primary">Start Your Free Trial</button>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <p>&copy; 2026 Elastic Tree. All rights reserved. | Professional Audio Transcription Service</p>
+    </footer>
+</body>
+</html>
