@@ -31,7 +31,22 @@ ET_GOLD   = "#F5A623"
 ET_GREEN  = "#44BB77"
 
 APP_PASSWORD = "elastictree2026"
-IS_STREAMLIT_CLOUD = bool(os.environ.get("STREAMLIT_CLOUD") or os.environ.get("STREAMLIT_SHARING_MODE"))
+
+def _is_truthy(v):
+    return str(v).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _detect_streamlit_cloud():
+    # Streamlit's documented env flags are not always present, so use
+    # lightweight filesystem/env heuristics as a fallback.
+    env_cloud = bool(os.environ.get("STREAMLIT_CLOUD") or os.environ.get("STREAMLIT_SHARING_MODE"))
+    fs_cloud = Path("/mount/src").exists() and Path("/home/adminuser").exists()
+    return env_cloud or fs_cloud
+
+
+IS_STREAMLIT_CLOUD = _detect_streamlit_cloud()
+FORCE_MEDIUM = _is_truthy(os.environ.get("ET_FORCE_MEDIUM")) or _is_truthy(st.secrets.get("force_medium", ""))
+CLOUD_SAFE_MODE = IS_STREAMLIT_CLOUD or FORCE_MEDIUM
 
 LANGUAGES = {
     "auto":"Auto-detect","hi":"Hindi","bn":"Bengali","ta":"Tamil",
@@ -658,7 +673,7 @@ with st.sidebar:
 
     st.markdown("<div class='sb-section'>Speaker Diarization</div>", unsafe_allow_html=True)
     _toggle = getattr(st, "toggle", st.checkbox)
-    true_speaker_sep = _toggle("True Speaker Separation", value=True,
+    true_speaker_sep = _toggle("True Speaker Separation", value=not CLOUD_SAFE_MODE,
                                help="Uses pyannote voice diarization.")
     hard_fail_diarization = _toggle("Hard Fail if Unavailable", value=False,
                                     help="Abort if true diarization cannot run.")
@@ -669,6 +684,10 @@ with st.sidebar:
         diar_min = st.number_input("Min Speakers", min_value=1, max_value=8, value=2)
     with col_max:
         diar_max = st.number_input("Max Speakers", min_value=1, max_value=8, value=4)
+    if CLOUD_SAFE_MODE:
+        true_speaker_sep = False
+        hard_fail_diarization = False
+        st.caption("Cloud-safe mode: true diarization is disabled for stability.")
 
     st.markdown("<div class='sb-section'>Output</div>", unsafe_allow_html=True)
     output_folder = st.text_input("Save Folder",
@@ -1021,8 +1040,8 @@ model_size = _safe_call(
     st.radio,
     {
         "label": "Whisper Model Size",
-        "options": ["medium", "large"],
-        "index": 0 if IS_STREAMLIT_CLOUD else 1,
+        "options": ["medium"] if CLOUD_SAFE_MODE else ["medium", "large"],
+        "index": 0,
         "horizontal": True,
         "format_func": lambda x: "Medium (faster)" if x == "medium" else "Large (more accurate)",
         "label_visibility": "collapsed",
@@ -1030,8 +1049,8 @@ model_size = _safe_call(
     },
     drop_keys=("horizontal", "label_visibility"),
 )
-if IS_STREAMLIT_CLOUD:
-    st.info("Cloud mode: defaulting to Medium for stability. Large may crash due to memory limits.")
+if CLOUD_SAFE_MODE:
+    st.info("Cloud-safe mode active: Whisper Medium is enforced for stability.")
 
 
 # ── File summary ───────────────────────────────────────────────
@@ -1067,10 +1086,7 @@ st.markdown(
 if st.button("🎙  Transcribe All Files"):
     out_path = Path(output_folder)
     out_path.mkdir(parents=True, exist_ok=True)
-    effective_model_size = model_size
-    if IS_STREAMLIT_CLOUD and model_size == "large":
-        effective_model_size = "medium"
-        st.warning("Large model is disabled on Streamlit Cloud to avoid memory kills. Using Medium.")
+    effective_model_size = "medium" if CLOUD_SAFE_MODE else model_size
     with st.spinner(f"Loading Whisper **{effective_model_size}** model…"):
         model = whisper.load_model(effective_model_size)
     st.success(f"Model ready — processing {len(uploaded_files)} file(s)")
