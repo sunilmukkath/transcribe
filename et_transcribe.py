@@ -17,7 +17,7 @@ except Exception:
     PYANNOTE_AVAILABLE = False
 
 st.set_page_config(
-    page_title="ET Transcribe",
+    page_title="ET Scribe",
     page_icon="🌀",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -31,6 +31,7 @@ ET_GOLD   = "#F5A623"
 ET_GREEN  = "#44BB77"
 
 APP_PASSWORD = "elastictree2026"
+IS_STREAMLIT_CLOUD = bool(os.environ.get("STREAMLIT_CLOUD") or os.environ.get("STREAMLIT_SHARING_MODE"))
 
 LANGUAGES = {
     "auto":"Auto-detect","hi":"Hindi","bn":"Bengali","ta":"Tamil",
@@ -512,7 +513,7 @@ if not st.session_state.authenticated:
         "background:linear-gradient(130deg,#ffffff 25%,#ededff 50%,#F5A623 80%);"
         "-webkit-background-clip:text;-webkit-text-fill-color:transparent;"
         "background-clip:text;'>"
-        "ET TRANSCRIBE"
+        "ET SCRIBE"
         "</div>"
         # sub-label
         "<div style='position:relative;z-index:1;font-size:0.72em;color:#3CBFBF;"
@@ -533,7 +534,7 @@ if not st.session_state.authenticated:
     with sc:
         st.markdown(
             "<div style='max-width:520px;margin:0 auto;'><div class='lp-signin-card'>"
-            "<div class='lp-signin-title'>Access ET Transcribe</div>"
+            "<div class='lp-signin-title'>Access ET Scribe</div>"
             "<div class='lp-signin-sub'>Enter password to continue</div>",
             unsafe_allow_html=True,
         )
@@ -594,7 +595,7 @@ if not st.session_state.authenticated:
         "<div style='text-align:center;color:#44446a;font-size:0.72em;"
         "border-top:1px solid rgba(255,255,255,0.05);padding-top:20px;'>"
         "&#169; 2026 Elastic Tree Consumer Insights. All Rights Reserved "
-        "&#183; ET Transcribe is a proprietary research product of Elastic Tree</div>",
+        "&#183; ET Scribe is a proprietary research product of Elastic Tree</div>",
         unsafe_allow_html=True,
     )
     st.stop()
@@ -612,7 +613,7 @@ with hdr_l:
         "<div style='display:flex;align-items:baseline;gap:14px;'>"
         "<div style='font-family:Playfair Display,Space Grotesk,Inter,serif;font-size:2.1em;"
         "font-weight:800;color:#f0f0fa;letter-spacing:-1px;line-height:1;'>"
-        "ET Transcribe</div>"
+        "ET Scribe</div>"
         "<div style='width:5px;height:5px;border-radius:50%;background:#F5A623;"
         "margin-bottom:3px;flex-shrink:0;'></div>"
         "<div style='font-size:0.72em;color:#55557a;letter-spacing:3px;"
@@ -1021,7 +1022,7 @@ model_size = _safe_call(
     {
         "label": "Whisper Model Size",
         "options": ["medium", "large"],
-        "index": 1,
+        "index": 0 if IS_STREAMLIT_CLOUD else 1,
         "horizontal": True,
         "format_func": lambda x: "Medium (faster)" if x == "medium" else "Large (more accurate)",
         "label_visibility": "collapsed",
@@ -1029,6 +1030,8 @@ model_size = _safe_call(
     },
     drop_keys=("horizontal", "label_visibility"),
 )
+if IS_STREAMLIT_CLOUD:
+    st.info("Cloud mode: defaulting to Medium for stability. Large may crash due to memory limits.")
 
 
 # ── File summary ───────────────────────────────────────────────
@@ -1064,8 +1067,12 @@ st.markdown(
 if st.button("🎙  Transcribe All Files"):
     out_path = Path(output_folder)
     out_path.mkdir(parents=True, exist_ok=True)
-    with st.spinner(f"Loading Whisper **{model_size}** model…"):
-        model = whisper.load_model(model_size)
+    effective_model_size = model_size
+    if IS_STREAMLIT_CLOUD and model_size == "large":
+        effective_model_size = "medium"
+        st.warning("Large model is disabled on Streamlit Cloud to avoid memory kills. Using Medium.")
+    with st.spinner(f"Loading Whisper **{effective_model_size}** model…"):
+        model = whisper.load_model(effective_model_size)
     st.success(f"Model ready — processing {len(uploaded_files)} file(s)")
 
     results = []
@@ -1217,7 +1224,7 @@ if st.button("🎙  Transcribe All Files"):
             f"<div class='result-card'>"
             f"<div class='result-header'>"
             f"<div class='result-title'>Transcript &nbsp;·&nbsp; {mode_label}</div>"
-            f"<div class='result-meta'>{lang_label} &nbsp;·&nbsp; Whisper {model_size}"
+            f"<div class='result-meta'>{lang_label} &nbsp;·&nbsp; Whisper {effective_model_size}"
             f" &nbsp;·&nbsp; <span class='{overall_css}'>{overall_label} Accuracy</span></div>"
             f"</div>"
             f"<div class='result-body'>"
@@ -1260,7 +1267,7 @@ if st.button("🎙  Transcribe All Files"):
         eq     = "═" * 55
         header = (f"ELASTIC TREE\n{eq}\nProject  : {project_name or 'Unnamed'}\n"
                   f"File     : {uploaded_file.name}\nLanguage : {lang_label}\n"
-                  f"Mode     : {mode_label}\nModel    : Whisper {model_size}\n"
+                  f"Mode     : {mode_label}\nModel    : Whisper {effective_model_size}\n"
                   f"Accuracy : {overall_label} (High:{high_c} Med:{med_c} Low:{low_c})\n"
                   f"Turns    : {len(turns)} speaker turns\n"
                   f"Date     : {datetime.now().strftime('%d %b %Y, %I:%M %p')}\n{eq}\n\n")
