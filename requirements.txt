@@ -2,3 +2,7 @@ streamlit>=1.31
 openai-whisper
 certifi
 numpy
+# Use CPU-only PyTorch on Linux (Streamlit Cloud) to avoid pulling CUDA stacks.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.11.0+cpu; platform_system == "Linux"
+torch; platform_system != "Linux"
