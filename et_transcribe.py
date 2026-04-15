@@ -44,6 +44,16 @@ LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAaoAAABNCAYAAAD3uSB4AAAAAXNSR0IArs4c6QAAAIRl
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+def _safe_call(func, kwargs, drop_keys=()):
+    """Call a Streamlit API with graceful fallback for older versions."""
+    try:
+        return func(**kwargs)
+    except TypeError:
+        fallback = dict(kwargs)
+        for key in drop_keys:
+            fallback.pop(key, None)
+        return func(**fallback)
+
 
 def _et_wordmark(size="1.5em", align="left"):
     """Elastic Tree logo as inline HTML (image or text fallback)."""
@@ -527,10 +537,15 @@ if not st.session_state.authenticated:
             "<div class='lp-signin-sub'>Enter password to continue</div>",
             unsafe_allow_html=True,
         )
-        pwd = st.text_input(
-            "Password", type="password",
-            placeholder="Enter password",
-            label_visibility="collapsed",
+        pwd = _safe_call(
+            st.text_input,
+            {
+                "label": "Password",
+                "type": "password",
+                "placeholder": "Enter password",
+                "label_visibility": "collapsed",
+            },
+            drop_keys=("label_visibility",),
         )
         if st.button("Sign In  →", type="primary", use_container_width=True):
             if pwd == APP_PASSWORD:
@@ -945,11 +960,15 @@ with up_l:
         "<p class='section-sub'>MP3 · WAV · MP4 · M4A · OGG · OPUS · WebM — max 200 MB/file</p>",
         unsafe_allow_html=True,
     )
-    uploaded_files = st.file_uploader(
-        "Upload files",
-        type=["mp3", "wav", "mp4", "m4a", "ogg", "opus", "webm"],
-        accept_multiple_files=True,
-        label_visibility="collapsed",
+    uploaded_files = _safe_call(
+        st.file_uploader,
+        {
+            "label": "Upload files",
+            "type": ["mp3", "wav", "mp4", "m4a", "ogg", "opus", "webm"],
+            "accept_multiple_files": True,
+            "label_visibility": "collapsed",
+        },
+        drop_keys=("label_visibility",),
     )
 with up_r:
     st.markdown(
@@ -997,14 +1016,18 @@ st.markdown(
     "<p class='section-sub'>Choose speed vs accuracy before starting transcription.</p>",
     unsafe_allow_html=True,
 )
-model_size = st.radio(
-    "Whisper Model Size",
-    options=["medium", "large"],
-    index=1,
-    horizontal=True,
-    format_func=lambda x: "Medium (faster)" if x == "medium" else "Large (more accurate)",
-    label_visibility="collapsed",
-    help="Medium is faster. Large is best quality.",
+model_size = _safe_call(
+    st.radio,
+    {
+        "label": "Whisper Model Size",
+        "options": ["medium", "large"],
+        "index": 1,
+        "horizontal": True,
+        "format_func": lambda x: "Medium (faster)" if x == "medium" else "Large (more accurate)",
+        "label_visibility": "collapsed",
+        "help": "Medium is faster. Large is best quality.",
+    },
+    drop_keys=("horizontal", "label_visibility"),
 )
 
 
