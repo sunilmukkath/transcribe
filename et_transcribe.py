@@ -1,7 +1,7 @@
 import ssl, certifi
 ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 
-import os, tempfile, base64
+import os, tempfile, base64, subprocess, json
 import re
 import streamlit as st
 import whisper
@@ -970,6 +970,46 @@ def build_true_diarized_turns(segments, diarization, gap):
     return turns, True
 
 
+def get_audio_duration_seconds(path, sample_rate=16000):
+    """Return audio duration without loading the whole file."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "json",
+            path,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = json.loads(proc.stdout or "{}")
+        dur = float((data.get("format") or {}).get("duration") or 0.0)
+        if dur > 0:
+            return dur
+    except Exception:
+        pass
+    # Fallback when ffprobe metadata is unavailable.
+    audio = whisper.load_audio(path)
+    return len(audio) / float(sample_rate)
+
+
+def load_audio_window(path, start_s, end_s, sample_rate=16000):
+    """Decode a single audio window via ffmpeg to limit memory usage."""
+    start_s = max(0.0, float(start_s))
+    end_s = max(start_s, float(end_s))
+    dur_s = end_s - start_s
+    if dur_s <= 0:
+        return np.zeros(1, dtype=np.float32)
+    cmd = [
+        "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error",
+        "-ss", str(start_s), "-t", str(dur_s),
+        "-i", path,
+        "-f", "s16le", "-ac", "1", "-acodec", "pcm_s16le",
+        "-ar", str(sample_rate), "-"
+    ]
+    proc = subprocess.run(cmd, capture_output=True, check=True)
+    audio = np.frombuffer(proc.stdout, np.int16).astype(np.float32) / 32768.0
+    return audio if len(audio) else np.zeros(1, dtype=np.float32)
+
+
 # ═══════════════════════════════════════════════════════════════
 # UPLOAD  — Step 1
 # ═══════════════════════════════════════════════════════════════
@@ -1112,18 +1152,17 @@ if st.button("🎙  Transcribe All Files"):
             tmp.write(uploaded_file.read())
             tmp_path = tmp.name
 
-        with st.spinner("Loading & decoding audio…"):
-            audio = whisper.load_audio(tmp_path)
-
-        total_samples  = len(audio)
-        total_duration = total_samples / SAMPLE_RATE
+        audio = None
+        with st.spinner("Reading audio metadata…"):
+            total_duration = get_audio_duration_seconds(tmp_path, sample_rate=SAMPLE_RATE)
         total_chunks   = max(1, int(np.ceil(max(0.0, total_duration - CHUNK_OVERLAP) / CHUNK_STRIDE)))
         mins, secs     = int(total_duration // 60), int(total_duration % 60)
 
         detected_lang = language
         if language == "auto":
             with st.spinner("Detecting language…"):
-                sample = whisper.pad_or_trim(audio)
+                sample_audio = load_audio_window(tmp_path, 0.0, min(30.0, total_duration), sample_rate=SAMPLE_RATE)
+                sample = whisper.pad_or_trim(sample_audio)
                 mel = whisper.log_mel_spectrogram(sample, model.dims.n_mels).to(model.device)
                 _, probs = model.detect_language(mel)
                 detected_lang = max(probs, key=probs.get)
@@ -1143,7 +1182,7 @@ if st.button("🎙  Transcribe All Files"):
         for chunk_idx in range(total_chunks):
             start_s    = chunk_idx * CHUNK_STRIDE
             end_s      = min((chunk_idx + 1) * CHUNK_SECONDS, total_duration)
-            chunk_audio = audio[int(start_s * SAMPLE_RATE):int(end_s * SAMPLE_RATE)]
+            chunk_audio = load_audio_window(tmp_path, start_s, end_s, sample_rate=SAMPLE_RATE)
             pct         = int((chunk_idx / total_chunks) * 100)
             pct_next    = int(((chunk_idx + 1) / total_chunks) * 100)
             progress_bar.progress(
@@ -1214,11 +1253,18 @@ if st.button("🎙  Transcribe All Files"):
                     try: os.unlink(tmp_path)
                     except Exception: pass
                     st.stop()
-            turns, _ = build_diarized_turns(all_segments, audio=audio,
-                                            sample_rate=SAMPLE_RATE, gap=gap, max_speakers=4)
-            msg = ("ℹ️ Add a Hugging Face token for true speaker diarization."
-                   if true_speaker_sep and not hf_token
-                   else "ℹ️ Used fallback speaker separation.")
+            if CLOUD_SAFE_MODE:
+                turns = build_speaker_turns(all_segments, gap=gap)
+                msg = "ℹ️ Cloud-safe fallback speaker turns are active."
+            else:
+                if audio is None:
+                    with st.spinner("Loading audio for fallback speaker separation…"):
+                        audio = whisper.load_audio(tmp_path)
+                turns, _ = build_diarized_turns(all_segments, audio=audio,
+                                                sample_rate=SAMPLE_RATE, gap=gap, max_speakers=4)
+                msg = ("ℹ️ Add a Hugging Face token for true speaker diarization."
+                       if true_speaker_sep and not hf_token
+                       else "ℹ️ Used fallback speaker separation.")
             st.info(msg)
 
         for t in turns:
