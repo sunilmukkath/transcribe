@@ -1,0 +1,2 @@
+# Install into the same environment you use to run ET Scribe before freezing.
+pyinstaller>=6.3.0

@@ -1,13 +1,51 @@
 import ssl, certifi
 ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 
-import os, tempfile, base64, subprocess, json
+import os, tempfile, base64, subprocess, json, sys
 import re
 import streamlit as st
+from streamlit.errors import StreamlitSecretNotFoundError
 import whisper
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+
+
+def _prepend_bundled_ffmpeg():
+    """If FFmpeg is shipped next to the app (or under bin/), put it on PATH."""
+    roots = []
+    br = os.environ.get("ET_BUNDLE_ROOT")
+    if br:
+        roots.append(Path(br).resolve())
+    if getattr(sys, "frozen", False):
+        roots.append(Path(sys.executable).resolve().parent)
+    for base in roots:
+        for d in (base, base / "bin"):
+            if any((d / n).exists() for n in ("ffmpeg", "ffmpeg.exe")):
+                os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
+                return
+
+
+def _whisper_download_root():
+    """Writable Whisper model cache for frozen installs; optional override for dev."""
+    env = os.environ.get("ET_WHISPER_CACHE")
+    if env:
+        Path(env).mkdir(parents=True, exist_ok=True)
+        return env
+    if not getattr(sys, "frozen", False):
+        return None
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        p = Path(base) / "ET-Scribe" / "whisper"
+    elif sys.platform == "darwin":
+        p = Path.home() / "Library" / "Application Support" / "ET-Scribe" / "whisper"
+    else:
+        p = Path.home() / ".local" / "share" / "ET-Scribe" / "whisper"
+    p.mkdir(parents=True, exist_ok=True)
+    return str(p)
+
+
+_prepend_bundled_ffmpeg()
 
 try:
     from pyannote.audio import Pipeline as PyannotePipeline
@@ -36,6 +74,14 @@ def _is_truthy(v):
     return str(v).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _secret_get(key, default=""):
+    """Read st.secrets without requiring secrets.toml for local dev."""
+    try:
+        return st.secrets.get(key, default)
+    except StreamlitSecretNotFoundError:
+        return default
+
+
 def _detect_streamlit_cloud():
     # Streamlit's documented env flags are not always present, so use
     # lightweight filesystem/env heuristics as a fallback.
@@ -45,7 +91,7 @@ def _detect_streamlit_cloud():
 
 
 IS_STREAMLIT_CLOUD = _detect_streamlit_cloud()
-FORCE_MEDIUM = _is_truthy(os.environ.get("ET_FORCE_MEDIUM")) or _is_truthy(st.secrets.get("force_medium", ""))
+FORCE_MEDIUM = _is_truthy(os.environ.get("ET_FORCE_MEDIUM")) or _is_truthy(_secret_get("force_medium", ""))
 CLOUD_SAFE_MODE = IS_STREAMLIT_CLOUD or FORCE_MEDIUM
 
 LANGUAGES = {
@@ -1127,8 +1173,12 @@ if st.button("🎙  Transcribe All Files"):
     out_path = Path(output_folder)
     out_path.mkdir(parents=True, exist_ok=True)
     effective_model_size = "medium" if CLOUD_SAFE_MODE else model_size
+    whisper_kw = {}
+    _dr = _whisper_download_root()
+    if _dr:
+        whisper_kw["download_root"] = _dr
     with st.spinner(f"Loading Whisper **{effective_model_size}** model…"):
-        model = whisper.load_model(effective_model_size)
+        model = whisper.load_model(effective_model_size, **whisper_kw)
     st.success(f"Model ready — processing {len(uploaded_files)} file(s)")
 
     results = []
